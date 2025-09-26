@@ -1,0 +1,505 @@
+import pygame
+import ctypes
+import time
+import math
+
+warning_promp = input(
+    "\n\nWARNING: RESULTS MAY VARY DEPENDING ON THE USER'S PERFORMANCE SPEED - MORE UNRELIABLE THE LOWER THE PLANET'S RADIUS - KEEPING ABOVE 50"
+    "\nNOTE: ENTERED RADIUS MIGHT BE MODIFIED TO FIT THE PROJECTILE RADIUS ACCORDINGLY TO PREVENT ANY ERRORS/UN-EXPECTED OUTCOMES"
+    "\n\n Do you understand?"
+    "\n(Y/N) ")
+
+if warning_promp.lower() == "y":
+    pass
+else:
+    exit()
+
+show_hitbox = False
+hitbox_promp = str(input("Do you wish to show hitbox lines?\n(Y/N) "))
+if hitbox_promp.lower() == "y":
+    show_hitbox = True
+
+
+#---------- Getting screen Resolution ---------------------------------
+
+user32 = ctypes.windll.user32
+user32.SetProcessDPIAware()  # makes sure scaling is handled
+
+screen_width = user32.GetSystemMetrics(0)
+screen_height = user32.GetSystemMetrics(1)
+
+#----------- Dictionaries ---------
+projectile_positions = {}
+projectile_list = {}
+r_dists = {}
+force_gravity = {}
+Force_vector_dict = {}
+
+#-------- Global projectile variables -------------
+projectile: pygame.draw.circle = None
+projectile_radius = 1
+projectile_alpha = 100
+projectile_colour = (255, 255, 255, projectile_alpha)
+projectile_dfe = 0  # dfe: distance from edge
+projectile_spacing_interval_y = 20
+projectile_mass = 10000
+projectile_spacing = 1 # usually p_radius*2 for best performance
+projectile_speed = 1000000000
+
+#------ Global planet variables -------------------
+
+max_Planet_radius = 250
+min_planet_radius = 1
+default_circle_radius = 100
+Planet_circle_radius = 0
+
+
+def ask_planet_radius():
+    global Planet_circle_radius
+    while True:
+        user_input = input(f"Enter Planet Radius (Default = {default_circle_radius}): ")
+        if user_input.strip() == "":  # if empty, use default
+            Planet_circle_radius = default_circle_radius
+            break
+        try:
+            Planet_circle_radius = int(user_input)
+            break
+        except ValueError:
+            print("Invalid input! Please enter an integer.")
+
+
+ask_planet_radius()
+
+if Planet_circle_radius % (projectile_radius * 2) != 0:
+    Planet_circle_radius -= Planet_circle_radius % (projectile_radius * 2)
+if Planet_circle_radius > max_Planet_radius:
+    Planet_circle_radius = max_Planet_radius
+elif Planet_circle_radius < min_planet_radius:
+    Planet_circle_radius = min_planet_radius
+
+black_hole_circle: pygame.draw.circle = None
+schwarzchild_circle: pygame.draw.circle = None
+
+#-------- Specific Check ---------------------------
+max_specific_check = len(projectile_list)  # highlight a certain projectile
+specific_check = 0
+default_specific_check = None
+
+
+def ask_specific_check():
+    global specific_check
+    while True:
+        user_input = input(f"Enter the projectile number you would like to view specifically: ")
+        if user_input.strip() == "":  # if empty, use default
+            specific_check = default_specific_check
+            break
+        try:
+            specific_check = int(user_input)
+            break
+        except ValueError:
+            print("Invalid input! Please enter an integer.")
+
+
+ask_specific_check()
+
+mask_pos = (0, 0)
+
+#------ Bools and Global time var -------------------
+
+running = True
+time_measured = False
+time_params_retreived = False
+time_start_recorded = False
+time_end_recorded = False
+elapsed_time_retreived = False
+real_speed_retreived = False
+
+Test_finished = False
+Main_finished = False
+
+keep_running_on_Projectiles_destroyed = True
+
+start_time = 0
+end_time = 0
+elapsed_time = 0
+time_offset = 10
+
+#---------- physics settings -------------------------
+
+c = 2.99792458 * 10 ** 8
+
+G_constant = 6.67430e-11
+sim_time = 0
+dt = 6e-5
+Vx, Vy = 0, 0
+distance_mult = 50 # 1 is to-scale
+sim_Planet_mass = 9.0 * 10 ** 30 # Earth mass = 5.97 * 10^24
+
+if Planet_circle_radius <= 3:
+    sim_Planet_radius = (2 * G_constant * sim_Planet_mass) / c ** 2
+else:
+    sim_Planet_radius = 44 * 1000  # Earth radius = 6378km
+
+#---------------- Creating Screens and Surfaces -------------------------------
+
+
+pygame.init()
+
+window_width = screen_width
+window_height = screen_height
+
+screen = pygame.display.set_mode((window_width, window_height))
+pygame.display.set_caption("Planet physics simulation - TEST RUN")
+
+main_alpha_surf = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
+hitbox_alpha_surf = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
+black_hole_alpha_surf = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
+schwarzchild_surf = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
+
+#-------------------- Creating Projectiles -------------------------------------
+
+num_of_left_projectiles = 0
+num_of_right_projectiles = 0
+
+total_projectiles = 0
+
+add_left_side = True
+add_right_side = False
+
+def create_projectiles():
+    global projectile, projectile_spacing_interval_y, projectile_dfe, projectile_radius
+    global projectile_positions, projectile_list
+    global num_of_left_projectiles, num_of_right_projectiles, total_projectiles
+
+    # Reset the dictionaries to avoid keeping old references
+    projectile_positions = {}
+    projectile_list = {}
+
+    if add_left_side:
+        for i, y in enumerate(range(int(-screen_height*2), int(screen_height*4))):
+            if y % projectile_spacing_interval_y == 0:
+                projectile = pygame.draw.circle(main_alpha_surf, projectile_colour, (projectile_dfe, y), projectile_radius)
+                projectile_positions[f"projectile {i}"] = (projectile.center, Vx, Vy)
+                projectile_list[f"projectile {i}"] = projectile
+
+                num_of_left_projectiles += 1
+                total_projectiles += 1
+
+    if add_right_side:
+        for ii, yy in enumerate(range(int(-screen_height), int(screen_height*2))):
+            if yy % projectile_spacing_interval_y == 0:
+                projectile = pygame.draw.circle(main_alpha_surf, projectile_colour, (window_width - projectile_dfe, yy), projectile_radius)
+                projectile_positions[f"projectile {ii + num_of_left_projectiles}"] = (projectile.center, Vx, Vy)
+                projectile_list[f"projectile {ii}"] = projectile
+
+                num_of_right_projectiles += 1
+                total_projectiles += 1
+
+create_projectiles()
+
+
+def check_projectile_info(table: dict[str, tuple[int, int]]):
+    global projectile_positions
+    for i, (_, value) in enumerate(table.items()):
+        print(f"projectile {i}: {value}")
+    return projectile_positions
+
+
+#-------------- Main loop -----------------------------------------------
+
+try:
+    while running:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    running = False
+                if event.key == pygame.K_i:
+                    check_projectile_info(projectile_positions)
+
+        sim_time += dt
+
+        #-------- Defining Planet --------------------------------
+        cubit_measurement = (sim_Planet_radius / Planet_circle_radius) * distance_mult
+
+        Planet_x = window_width / 2
+        Planet_y = window_height / 2
+
+        size: str = f"{(Planet_circle_radius / default_circle_radius):.2f}x"
+
+        Planet = pygame.draw.circle(screen, (0, 255, 0), (Planet_x, Planet_y), Planet_circle_radius)
+        Planet_center_circle = pygame.draw.circle(screen, (255, 0, 0), (Planet_x, Planet_y), 3)
+
+        Planet_left_x = Planet_x - Planet_circle_radius
+        Planet_right_x = Planet_x + Planet_circle_radius
+
+        if not time_params_retreived:
+            print(f"time start params - Start x: {Planet_left_x} End x: {Planet_right_x}")
+            time_params_retreived = True
+
+        for index, (_, proj) in enumerate(projectile_list.items()):  # updating r_dist
+            r_dists[f"projectile {index}"] = math.hypot(Planet.x - proj.x, Planet.y - proj.y) * cubit_measurement
+
+        if specific_check is not None:
+            force_gravity = G_constant * (
+                    (sim_Planet_mass * projectile_mass) / r_dists[f"projectile {specific_check}"] ** 2)
+        else:
+            for i, (_, distance) in enumerate(r_dists.items()):
+                force_gravity[f"projectile {i}"] = G_constant * ((sim_Planet_mass * projectile_mass) / distance ** 2)
+
+        start_line_x = pygame.draw.line(hitbox_alpha_surf, (255, 0, 0, 100), (Planet_left_x, 0),
+                                        (Planet_left_x, screen_height))
+        end_line_x = pygame.draw.line(hitbox_alpha_surf, (0, 0, 255, 100), (Planet_right_x, 0),
+                                      (Planet_right_x, screen_height))
+
+
+        #------- Defining Projectile motion --------------------------------
+        def get_speed_at_mps(time_taken, distance):
+            if time_taken is None or time_taken == 0:
+                return None
+            return distance / time_taken
+
+
+        def get_speed_at_kps(time_taken, distance):
+            if time_taken is None or time_taken == 0:
+                return None
+            return (distance / 1000) / (time_taken / 3600)
+
+
+        def get_speed_at_kph(time_taken, distance):
+            if time_taken is None or time_taken == 0:
+                return None
+            return (distance / 1000) / time_taken
+
+        if not Test_finished:
+            main_alpha_surf.fill((0, 0, 0, 5))
+            # update projectile positions
+            for key, value in list(projectile_positions.items()):
+                center, Vx, Vy = value
+                x, y = center
+                new_x = x + projectile_spacing
+                time.sleep(1 / projectile_speed)
+                if Planet_circle_radius > 3:
+                    if new_x < Planet_circle_radius/128 + time_offset + projectile_dfe:
+                        projectile_positions[key] = ((new_x, y), Vx, Vy)
+
+                        def get_elapsed_time():
+                            global start_time, end_time, elapsed_time
+                            global time_start_recorded, time_end_recorded, time_measured
+
+                            tolerance = 1.0
+
+                            if abs(new_x - (time_offset + projectile_dfe)) < tolerance:
+                                if not time_start_recorded:
+                                    start_time = time.time()
+                                    print(f"recording_started: {start_time}")
+                                    time_start_recorded = True
+                            elif abs(new_x - (time_offset + Planet_circle_radius/128 + projectile_dfe)) < tolerance:
+                                if not time_end_recorded:
+                                    end_time = time.time()
+                                    print(f"recording_finished: {end_time}")
+                                    time_end_recorded = True
+
+                                    if not time_measured and start_time is not None:
+                                        elapsed_time = end_time - start_time
+                                        time_measured = True
+                                        print(f"Start: {start_time} End: {end_time}")
+                                        print(f"elapsed_time: {elapsed_time:.5f}s")
+                                        return elapsed_time * 256
+                                return None
+                            return None
+
+
+                        elapsed_time = get_elapsed_time()
+                        if elapsed_time:
+                            real_speed_mps = get_speed_at_mps(elapsed_time, sim_Planet_radius * 2)
+                            real_speed_kps = get_speed_at_kph(elapsed_time, sim_Planet_radius * 2)
+                            real_speed_kph = get_speed_at_kps(elapsed_time, sim_Planet_radius * 2)
+                            if not real_speed_retreived:
+                                print(f"\nREAL PLANET RADIUS: {sim_Planet_radius / 1000}km")
+                                print(f"REAL PLANET MASS: {sim_Planet_mass}")
+                                print(f"SIM PLANET RADIUS: {Planet_circle_radius}")
+                                print(f"CURRENT ZOOM: {size}")
+                                print(f"\nestimate projectile speed: ~{round(real_speed_mps, 0)}m/s")
+                                print(f"estimate projectile speed: ~{round(real_speed_kps, 0)}km/s")
+                                print(f"estimate projectile speed: ~{round(real_speed_kph, 0)}km/h")
+
+                                real_speed_retreived = True
+
+                    else:
+                        del projectile_positions[key]
+                        if key in projectile_list:
+                            del projectile_list[key]
+                            screen.fill((0, 0, 0, 0))
+
+                else:
+                    if new_x < Planet_circle_radius + time_offset + projectile_dfe:
+                        projectile_positions[key] = ((new_x, y), Vx, Vy)
+
+
+                        def get_elapsed_time():
+                            global start_time, end_time, elapsed_time
+                            global time_start_recorded, time_end_recorded, time_measured
+
+                            tolerance = 1.0
+
+                            if abs(new_x - (time_offset + projectile_dfe)) < tolerance:
+                                if not time_start_recorded:
+                                    start_time = time.time()
+                                    print(f"recording_started: {start_time}")
+                                    time_start_recorded = True
+                            elif abs(new_x - (time_offset + Planet_circle_radius + projectile_dfe)) < tolerance:
+                                if not time_end_recorded:
+                                    end_time = time.time()
+                                    print(f"recording_finished: {end_time}")
+                                    time_end_recorded = True
+
+                                    if not time_measured and start_time is not None:
+                                        elapsed_time = end_time - start_time
+                                        time_measured = True
+                                        print(f"Start: {start_time} End: {end_time}")
+                                        print(f"elapsed_time: {elapsed_time:.5f}s")
+                                        return elapsed_time * 2
+                                return None
+                            return None
+
+
+                        elapsed_time = get_elapsed_time()
+                        if elapsed_time:
+                            real_speed_mps = get_speed_at_mps(elapsed_time, sim_Planet_radius * 2)
+                            real_speed_kps = get_speed_at_kph(elapsed_time, sim_Planet_radius * 2)
+                            real_speed_kph = get_speed_at_kps(elapsed_time, sim_Planet_radius * 2)
+                            if not real_speed_retreived:
+                                print(f"\nREAL PLANET RADIUS: {sim_Planet_radius / 1000}km")
+                                print(f"REAL PLANET MASS: {sim_Planet_mass}")
+                                print(f"SIM PLANET RADIUS: {Planet_circle_radius}")
+                                print(f"CURRENT ZOOM: {size}")
+                                print(f"\nestimate projectile speed: ~{round(real_speed_mps, 0)}m/s")
+                                print(f"estimate projectile speed: ~{round(real_speed_kps, 0)}km/s")
+                                print(f"estimate projectile speed: ~{round(real_speed_kph, 0)}km/h")
+
+                                real_speed_retreived = True
+
+                    else:
+                        del projectile_positions[key]
+                        if key in projectile_list:
+                            del projectile_list[key]
+                            screen.fill((0, 0, 0, 0))
+
+        elif Test_finished:
+            main_alpha_surf.fill((0, 0, 0, 1))
+
+            # ----- Calc for tangential force and motion ----------------
+
+            for i, (key, value) in enumerate(list(projectile_positions.items())):
+                # value could be ((x,y), Vx, Vy) or old format; normalize
+                if isinstance(value[0], tuple) and len(value) == 3:
+                    (x, y), Vx, Vy = value
+                else:
+                    x, y = value[0], value[1]
+                    Vx, Vy = 0, 0
+
+                # compute vector from projectile to planet center
+                dx = Planet_x - x
+                dy = Planet_y - y
+                distance = math.hypot(dx, dy) * distance_mult
+                if distance == 0:
+                    continue  # avoid division by zero
+
+                # gravitational force magnitude
+                F = G_constant * (sim_Planet_mass * projectile_mass) / distance ** 2
+
+                # unit vector toward planet
+                ux, uy = dx / distance, dy / distance
+
+                # acceleration = F / m
+                ax = F / projectile_mass * ux
+                ay = F / projectile_mass * uy
+
+                # integrate velocity
+                Vx += ax * dt
+                Vy += ay * dt
+
+                # update position
+                if i < num_of_left_projectiles:
+                    x += (Vx * dt) + projectile_spacing
+                    y += Vy * dt
+                else:
+                    x += (Vx * dt) - projectile_spacing
+                    y += Vy * dt
+
+                # store updated values back
+                projectile_positions[key] = ((x, y), Vx, Vy)
+
+                if Planet_circle_radius > 3:
+                    # remove if inside planet
+                    dist_sq = (x - Planet_x) ** 2 + (y - Planet_y) ** 2
+                    if dist_sq <= (Planet_circle_radius + projectile_radius) ** 2:
+                        del projectile_positions[key]
+                        if key in projectile_list:
+                            del projectile_list[key]
+                else:
+                    # remove if inside Schwarzschild radius
+                    dx_s = x - Planet_x
+                    dy_s = y - Planet_y
+                    dist_sq = dx_s ** 2 + dy_s ** 2
+                    event_horizon_radius_px = sim_Planet_radius / 1000  # in pixels
+                    if dist_sq <= (event_horizon_radius_px + projectile_radius) ** 2:
+                        del projectile_positions[key]
+
+
+                # time.sleep to control simulation speed
+                time.sleep(1 / projectile_speed)
+
+        # Draw all projectiles
+        projectile_list = {}
+        for key, value in projectile_positions.items():
+            (x, y), Vx, Vy = value
+            projectile_list[key] = pygame.draw.circle(main_alpha_surf, projectile_colour, (int(x), int(y)), projectile_radius)
+
+        if specific_check is not None:
+            for i, (_, coord) in enumerate(projectile_positions.items()):
+                if i == specific_check:
+                    mask_pos = coord[0] if isinstance(coord[0], tuple) else coord
+                    specific_check_mask = pygame.draw.circle(main_alpha_surf, (255, 0, 255, 255), mask_pos, projectile_radius + 3)
+
+        if Planet_circle_radius <= 2:
+
+            black_hole_circle = pygame.draw.circle(surface=black_hole_alpha_surf,
+                                                   color=(255,255,255,255),
+                                                   center=(Planet_x, Planet_y),
+                                                   radius=(sim_Planet_radius / 1000) / 2,
+                                                   width=1)
+
+            schwarzchild_circle = pygame.draw.circle(surface= schwarzchild_surf,
+                                                     color= (15,15,15,100),
+                                                     center= (Planet_x, Planet_y),
+                                                     radius= sim_Planet_radius / 1000,
+                                                     width= black_hole_circle.width)
+
+            screen.blit(schwarzchild_surf, (0, 0))
+            screen.blit(black_hole_alpha_surf, (0, 0))
+
+        screen.blit(main_alpha_surf, (0, 0))
+        if show_hitbox:
+            screen.blit(hitbox_alpha_surf, (0, 0))
+
+        if len(projectile_positions) == 0 and not Test_finished:
+            print("\nTest finished, gathered results")
+            print(f"real pixel length: {cubit_measurement:.0f}m")
+            pygame.display.set_caption("Planet physics simulation - REAL RUN")
+            print("Running with implemented physics")
+            print(f"\nschwarzchild radius: {(sim_Planet_radius / 1000)}km")
+            create_projectiles()
+            Test_finished = True
+
+        if len(projectile_positions) == 0 and Test_finished and not Main_finished:
+            print("\nTest finished, gathered results")
+            Main_finished = True
+            running = keep_running_on_Projectiles_destroyed
+
+        pygame.display.flip()
+
+except KeyboardInterrupt:
+    print(KeyboardInterrupt)
