@@ -1,0 +1,235 @@
+import pygame
+import ctypes
+import math
+import numpy as np
+import random
+import itertools
+
+user32 = ctypes.windll.user32
+SCREEN_WIDTH = user32.GetSystemMetrics(0)
+SCREEN_HEIGHT = user32.GetSystemMetrics(1)
+
+screen_factor = 0.5
+WINDOW_WIDTH = int(SCREEN_WIDTH * screen_factor)
+WINDOW_HEIGHT = int(SCREEN_HEIGHT * screen_factor)
+
+screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+pygame.display.set_caption("Pong")
+
+pygame.init()
+
+player_height = 150* screen_factor
+player_width = 40 * screen_factor
+
+
+player1_rect = None
+player1 = None
+player1_origin_pos = (80 * screen_factor, (WINDOW_HEIGHT/2) - (player_height/2))
+player1_centre_pos = (0, 0)
+
+player2_rect = None
+player2 = None
+player2_origin_pos = (WINDOW_WIDTH - (80 + player_width)*screen_factor, (WINDOW_HEIGHT/2) - (player_height/2))
+player2_centre_pos = (0, 0)
+
+Ball = None
+Ball_radius = 15*screen_factor
+Ball_pos = (WINDOW_WIDTH/2, WINDOW_HEIGHT/2)
+
+
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+RED = (255, 0, 0)
+GREEN = (0, 255, 0)
+BLUE = (0, 0, 255)
+
+clock = pygame.time.Clock()
+
+p1_r1 = [i for i in range(120, 160)]
+p1_r2 = [-i for i in range(120, 160)]
+starter_p1_angle_range = [int(x) for x in itertools.chain.from_iterable([ p1_r1, p1_r2 ])]
+
+p2_r1 = [i for i in range(20, 60)]
+p2_r2 = [-i for i in range(20, 60)]
+starter_p2_angle_range = [int(x) for x in itertools.chain.from_iterable([ p2_r1, p2_r2 ])]
+
+combined_range = [int(x) for x in itertools.chain.from_iterable([ starter_p1_angle_range, starter_p2_angle_range ])]
+
+game_start = False
+startup_loaded = False
+player_won_last_game = None
+starter_angle = random.choice(combined_range)
+
+angle = -45
+speed = 10 * screen_factor
+
+speed_factor = 1.025
+
+player1_points = 0
+player2_points = 0
+
+distance_from_middle_edge = 0
+
+running = True
+while running:
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            running = False
+
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                running = False
+            elif event.key == pygame.K_i:
+                print("Window size: ",screen.get_size())
+
+            elif event.key == pygame.K_r:
+                player1_points = 0
+                player2_points = 0
+                game_start = False
+                startup_loaded = False
+                player_won_last_game = None
+
+            elif event.key == pygame.K_t:
+                game_start = False
+                startup_loaded = False
+
+            elif event.key == pygame.K_SPACE:
+                game_start = True
+
+    screen.fill(WHITE)
+
+    #======== Player 1 ===============
+
+    player1_rect = pygame.Rect(player1_origin_pos[0], player1_origin_pos[1], player_width, player_height)
+    player1 = pygame.draw.rect(screen, BLACK, player1_rect)
+
+    if pygame.key.get_pressed()[pygame.K_w]:
+        player1.y -= 10
+        player1_origin_pos = (max(0,min(WINDOW_WIDTH,player1.x)), max(0, min(WINDOW_HEIGHT,player1.y)))
+        player1_centre_pos = player1.center
+    if pygame.key.get_pressed()[pygame.K_s]:
+        player1.y += 10
+        player1_origin_pos = (max(0,min(WINDOW_WIDTH,player1.x)), max(0, min(int(WINDOW_HEIGHT-player_height),player1.y)))
+        player1_centre_pos = player1.center
+
+    #======== Player 2 ===============
+
+    player2_rect = pygame.Rect(player2_origin_pos[0], player2_origin_pos[1], player_width, player_height)
+    player2 = pygame.draw.rect(screen, BLACK, player2_rect)
+
+    if pygame.key.get_pressed()[pygame.K_UP]:
+        player2.y -= 10
+        player2_origin_pos = (max(0,min(WINDOW_WIDTH,player2.x)), max(0, min(WINDOW_HEIGHT,player2.y)))
+        player2_centre_pos = player2.center
+    if pygame.key.get_pressed()[pygame.K_DOWN]:
+        player2.y += 10
+        player2_origin_pos = (max(0,min(WINDOW_WIDTH,player2.x)), max(0, min(int(WINDOW_HEIGHT-player_height),player2.y)))
+        player2_centre_pos = player2.center
+
+    #======= Ball ================
+
+    if game_start:
+        if not startup_loaded:
+            Ball_pos = (WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2)
+            angle = random.choice(starter_p2_angle_range) if player_won_last_game == 1 else random.choice(starter_p1_angle_range) if player_won_last_game == 2 else random.choice(combined_range)
+            speed = 10 * screen_factor
+            startup_loaded = True
+
+        Ball = pygame.draw.circle(screen, BLACK, Ball_pos, Ball_radius)
+
+        # Compute movement vector
+        dx = math.cos(math.radians(angle)) * speed
+        dy = -math.sin(math.radians(angle)) * speed  # negative because screen y goes down
+
+        new_x = Ball_pos[0] + dx
+        new_y = Ball_pos[1] + dy
+
+        # Check horizontal collisions
+        if new_x >= WINDOW_WIDTH - Ball_radius: # player 1 Won
+            #new_x = WINDOW_WIDTH - Ball_radius
+            #angle = 180 - angle
+            #dx = math.cos(math.radians(angle)) * speed
+            print("Player 1 won the round")
+            player1_points += 1
+            game_start = False
+            startup_loaded = False
+            player_won_last_game = 1
+        elif new_x <= Ball_radius: # player 2 won
+            #new_x = Ball_radius
+            #angle = 180 - angle
+            #dx = math.cos(math.radians(angle)) * speed
+            print("Player 2 won the round")
+            player2_points += 1
+            game_start = False
+            startup_loaded = False
+            player_won_last_game = 2
+
+        # Check vertical collisions
+        if new_y >= WINDOW_HEIGHT - Ball_radius:
+            new_y = WINDOW_HEIGHT - Ball_radius
+            angle = -angle
+            #print("angle changed to ", angle)
+            dy = -math.sin(math.radians(angle)) * speed
+            #print("dy changed")
+        elif new_y <= Ball_radius:
+            new_y = Ball_radius
+            angle = -angle
+            #print("angle changed to ", angle)
+            dy = -math.sin(math.radians(angle)) * speed
+            #print("dy changed")
+
+        if Ball.colliderect(player1_rect):
+            new_x = player1_rect.right + Ball_radius
+
+            ball_current_y = Ball.centery
+            player1_current_y = player1.centery + 1
+            distance_from_middle_edge = (player1_current_y - ball_current_y)*2*screen_factor
+            #print(ball_current_y, player1_current_y)
+            #print(distance_from_middle_edge)
+
+            angle = 180 - angle - distance_from_middle_edge
+            speed *= speed_factor
+            dx = math.cos(math.radians(angle)) * speed
+
+        elif Ball.colliderect(player2_rect):
+            new_x = player2_rect.left - Ball_radius
+
+            ball_current_y = Ball.centery
+            player2_current_y = player2.centery + 1
+            distance_from_middle_edge = (player2_current_y - ball_current_y) * 2 * screen_factor
+            #print(ball_current_y, player2_current_y)
+            #print(distance_from_middle_edge)
+
+            angle = 180 - angle - distance_from_middle_edge
+
+            speed *= speed_factor
+            dx = math.cos(math.radians(angle)) * speed
+
+        Ball_pos = (new_x, new_y)
+
+        print(angle)
+        #print(f"Dx: {dx}, Dy: {dy}")
+
+    player1_font = pygame.font.Font(r'pixellari\Pixellari.ttf', 100)
+    text1_render = player1_font.render(f"{player1_points}", True, BLACK)
+
+    player2_font = pygame.font.Font(r'pixellari\Pixellari.ttf', 100)
+    text2_render = player1_font.render(f"{player2_points}", True, BLACK)
+
+    for i in np.linspace(0, WINDOW_HEIGHT, 50):
+        dotted_line = pygame.draw.circle(screen, BLACK, (SCREEN_WIDTH/2*screen_factor, i), 1)
+
+    #player1_center_line = pygame.draw.line(screen, GREEN, (0, player1.centery), (WINDOW_WIDTH, player1.centery), 1)
+    #player2_center_line = pygame.draw.line(screen, RED, (0, player2.centery), (WINDOW_WIDTH, player2.centery), 1)
+
+    text1_render.set_alpha(128)
+    text2_render.set_alpha(128)
+
+    screen.blit(text1_render, (WINDOW_WIDTH/2 - 126, 20))
+    screen.blit(text2_render, (WINDOW_WIDTH/2 + 63, 20))
+
+    pygame.display.flip()
+
+    clock.tick(60)
+
+pygame.quit()
