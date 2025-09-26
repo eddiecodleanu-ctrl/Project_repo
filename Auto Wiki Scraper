@@ -1,0 +1,48 @@
+from plistlib import InvalidFileException
+from urllib.error import URLError
+
+import requests
+import wikipedia
+import os
+
+from wikipedia import DisambiguationError
+
+try:
+    with open("C:/Users/liviu/Documents/Example.txt", "w") as text_file:
+        print("This is a search engine that will print up to a maximum of 10,000 characters unless manually changed")
+        prompt = input("What would you like to search for?")
+
+        page = wikipedia.page(prompt)
+        url = page.url
+
+        request = requests.get(url)
+        print("requesting url...")
+        text = request.text
+        content = page.content
+        print("retrieved text...")
+
+        text_file.write(content[:])
+        print("writing file")
+
+        ans = input("Would you like to open up the file?\nY/N\n")
+        if ans.lower() == "y":
+            print("opening file...")
+            os.startfile("C:/Users/liviu/Documents/Example.txt")
+        else:
+            print("okay, open up the file manually or exit out of this script")
+
+except FileNotFoundError:
+    print(str.upper(" File not found, try again"))
+except KeyboardInterrupt:
+    print(str.upper(" User cancelled"))
+except TypeError:
+    print(str.upper(" There is a type error, try again"))
+except InvalidFileException:
+    print(str.upper(" File not found, try again"))
+except URLError:
+    print(str.upper(" This is not a valid URL, try again"))
+except UnicodeEncodeError as UEE:
+    print(" ",UEE," perhaps try to truncate to a shorter string")
+except DisambiguationError:
+    print(f"'{prompt}' can refer to many things, please be more specific.")
+
