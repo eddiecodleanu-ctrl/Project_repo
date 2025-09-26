@@ -1,0 +1,83 @@
+filepath = input("Enter the file path: ")
+
+possible_headers = [
+    b'PDF:',
+    b'DOCX:',
+    b'XLSX:',
+    b'PPTX:',
+    b'TXT:',
+    b'MD:',
+    b'RTF:',
+    b'CSV:',
+    b'JSON:',
+    b'XML:',
+    b'HTML:',
+    b'CSS:',
+    b'JS:',
+    b'JAVA:',
+    b'PY:',
+    b'C:',
+    b'CPP:',
+    b'H:',
+    b'RB:',
+    b'GO:',
+    b'PHP:',
+    b'EXE:',
+    b'DLL:',
+    b'BAT:',
+    b'SH:',
+    b'ZIP:',
+    b'RAR:',
+    b'7Z:',
+    b'TAR:',
+    b'GZ:',
+    b'ISO:',
+    b'MP3:',
+    b'WAV:',
+    b'FLAC:',
+    b'MP4:',
+    b'AVI:',
+    b'MKV:',
+    b'MOV:',
+    b'PNG:',
+    b'JPG:',
+    b'JPEG:',
+    b'GIF:',
+    b'BMP:',
+    b'TIFF:',
+    b'WEBP:',
+    b'SVG:',
+    b'ICO:',
+    b'PSD:',
+    b'AI:',
+    b'INDD:',
+]
+
+with open(filepath, "rb+") as file:
+    file.seek(0)
+
+    for header in possible_headers:
+
+        print("TRYING:", header.decode())
+        encrypted_header = file.read(len(header.decode()))
+        print("ENCRYPTED HEADER: ", encrypted_header)
+
+        for trial_len in range(1, len(header)+1):
+
+            print("TRIAL LENGTH: ", trial_len)
+
+            key = [0] * trial_len
+            for i, (c, p) in enumerate(zip(header, encrypted_header)):
+                key[i % trial_len] = c ^ p
+            decrypted = bytes([b ^ key[i % trial_len] for i, b in enumerate(encrypted_header)])
+
+            if decrypted != header:
+                print(f"\nTRIAL LENGTH: {trial_len} BYTE(s)"
+                      f"\nTRIAL KEY: {key}"
+                      f"\nTARGET: {header}"
+                      f"\nFOUND: {decrypted}")
+            else:
+                print(f"\n\nFOUND MATCH: {decrypted}"
+                      f"\nTRIAL LENGTH: {trial_len} BYTE(s)"
+                      f"\nTRIAL KEY: {key}")
+                break
