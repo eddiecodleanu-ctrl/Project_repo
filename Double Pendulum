@@ -1,0 +1,96 @@
+import pygame
+import math
+import sys
+
+# Initialize Pygame
+pygame.init()
+
+# Screen setup
+WIDTH, HEIGHT = 800, 600
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Double Pendulum Simulation")
+
+# Clock
+clock = pygame.time.Clock()
+
+# Physics parameters
+g = 9.81
+
+# Pendulum properties
+L1, L2 = 200, 200   # lengths
+m1, m2 = 20, 20     # masses (for dynamics)
+theta1, theta2 = math.pi, math.pi + 0.01  # initial angles - pi/2 default
+omega1, omega2 = 0.0, 0.0  # angular velocities
+dt = 0.1
+
+# Origin
+origin = (WIDTH // 2, HEIGHT // 4)
+
+# Colors
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+RED   = (200, 50, 50)
+BLUE  = (50, 50, 200)
+
+# Path trace for beauty
+trace = []
+
+def update_physics():
+    global theta1, theta2, omega1, omega2
+
+    # Equations of motion for double pendulum
+    num1 = -g * (2 * m1 + m2) * math.sin(theta1)
+    num2 = -m2 * g * math.sin(theta1 - 2 * theta2)
+    num3 = -2 * math.sin(theta1 - theta2) * m2
+    num4 = (omega2**2) * L2 + (omega1**2) * L1 * math.cos(theta1 - theta2)
+    den = L1 * (2 * m1 + m2 - m2 * math.cos(2 * theta1 - 2 * theta2))
+    alpha1 = (num1 + num2 + num3 * num4) / den
+
+    num1 = 2 * math.sin(theta1 - theta2)
+    num2 = (omega1**2) * L1 * (m1 + m2)
+    num3 = g * (m1 + m2) * math.cos(theta1)
+    num4 = (omega2**2) * L2 * m2 * math.cos(theta1 - theta2)
+    den = L2 * (2 * m1 + m2 - m2 * math.cos(2 * theta1 - 2 * theta2))
+    alpha2 = (num1 * (num2 + num3 + num4)) / den
+
+    omega1 += alpha1 * dt
+    omega2 += alpha2 * dt
+    theta1 += omega1 * dt
+    theta2 += omega2 * dt
+
+def get_positions():
+    x1 = origin[0] + L1 * math.sin(theta1)
+    y1 = origin[1] + L1 * math.cos(theta1)
+    x2 = x1 + L2 * math.sin(theta2)
+    y2 = y1 + L2 * math.cos(theta2)
+    return (x1, y1), (x2, y2)
+
+while True:
+    # Handle events
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            pygame.quit()
+            sys.exit()
+
+    # Update physics
+    update_physics()
+    p1, p2 = get_positions()
+
+    # Save trace of second bob
+    trace.append(p2)
+    if len(trace) > 1000:
+        trace.pop(0)
+
+    # Draw
+    screen.fill(WHITE)
+    pygame.draw.line(screen, BLACK, origin, p1, 2)
+    pygame.draw.circle(screen, RED, (int(p1[0]), int(p1[1])), m1)
+    pygame.draw.line(screen, BLACK, p1, p2, 2)
+    pygame.draw.circle(screen, BLUE, (int(p2[0]), int(p2[1])), m2)
+
+    # Draw trace
+    if len(trace) > 2:
+        pygame.draw.lines(screen, (150, 150, 150), False, trace, 1)
+
+    pygame.display.flip()
+    clock.tick(60)
