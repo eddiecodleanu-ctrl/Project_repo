@@ -1,0 +1,52 @@
+import pygame
+
+pygame.init()
+
+screen = pygame.display.set_mode((150, 90))
+pygame.display.set_caption("FPS Display")
+
+clock = pygame.time.Clock()
+
+# Store previous FPS and timer
+prev_fps = None
+last_update = 0
+fps_text = ""
+
+running = True
+while running:
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            running = False
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                running = False
+
+    screen.fill((0, 0, 0))
+
+    # Limit frame rate
+    clock.tick()
+    fps = int(clock.get_fps())
+
+    # Check time (in milliseconds)
+    current_time = pygame.time.get_ticks()
+
+    if current_time - last_update >= 500:  # update every 500ms (0.5s)
+        if fps != prev_fps:  # only update if FPS actually changed
+            prev_fps = fps
+            fps_text = f"FPS: {fps}"
+        last_update = current_time
+
+    # Render text
+    font = pygame.font.Font(None, 30)
+    text_surface = font.render(fps_text, True, (255, 255, 255))
+    text_rect = text_surface.get_rect(center=(screen.get_width() / 2, screen.get_height() / 2))
+    screen.blit(text_surface, text_rect)
+
+    pygame.display.flip()
+
+pygame.quit()
+
+
+
+
+
