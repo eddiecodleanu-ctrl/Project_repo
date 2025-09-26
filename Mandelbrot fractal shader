@@ -1,0 +1,256 @@
+import pygame
+from pygame.locals import DOUBLEBUF, OPENGL
+from OpenGL.GL import *
+from OpenGL.GL.shaders import compileProgram, compileShader
+import numpy as np
+
+# -----------------------
+# Settings
+# -----------------------
+pygame.init()
+pygame.mixer.init(frequency=44100, size=-16, channels=2)
+
+SCREEN_SCALE = 1
+info = pygame.display.Info()
+WIDTH = int(info.current_w * SCREEN_SCALE)
+HEIGHT = int(info.current_h * SCREEN_SCALE)
+
+screen = pygame.display.set_mode((WIDTH, HEIGHT), DOUBLEBUF | OPENGL)
+pygame.display.set_caption("Generalized Mandelbrot Shader")
+
+MAX_ITER = 100
+degree = 2  # can be int, float, or complex
+
+# -----------------------
+# GLSL Shaders
+# -----------------------
+vertex_shader = """
+#version 330
+in vec2 position;
+out vec2 fragCoord;
+void main() {
+    fragCoord = position;
+    gl_Position = vec4(position, 0.0, 1.0);
+}
+"""
+
+fragment_shader = """
+#version 330
+in vec2 fragCoord;
+out vec4 outColor;
+
+uniform vec2 u_resolution;
+uniform vec2 u_center;
+uniform float u_scale;
+uniform int u_max_iter;
+uniform vec2 u_degree;  // real, imag
+
+vec2 complex_pow(vec2 z, vec2 power) {
+    float r = length(z);
+    float theta = atan(z.y, z.x);
+
+    if (r == 0.0) return vec2(0.0, 0.0);
+
+    float log_r = log(r);
+    float a = power.x;
+    float b = power.y;
+
+    float exp_real = a*log_r - b*theta;
+    float exp_imag = b*log_r + a*theta;
+
+    float mag = exp(exp_real);
+    return vec2(mag * cos(exp_imag), mag * sin(exp_imag));
+}
+
+void main() {
+    vec2 uv = fragCoord * 0.5 + 0.5;
+    float x0 = (uv.x - 0.5) * u_scale * u_resolution.x/u_resolution.y + u_center.x;
+    float y0 = (uv.y - 0.5) * u_scale + u_center.y;
+    vec2 c = vec2(x0, y0);
+
+    vec2 z = vec2(0.0, 0.0);
+    int i;
+    for (i = 0; i < u_max_iter; i++) {
+        z = complex_pow(z, u_degree) + c;
+        if (length(z) > 4.0) break;
+    }
+
+    if (i == u_max_iter) {
+        outColor = vec4(0.0, 0.0, 0.0, 1.0);
+    } else {
+        float mu = float(i) - log2(log(length(z))) + 4.0;
+        float t = mu / float(u_max_iter);
+
+        float r = max(0.0, min(1.0, 9.0*(1.0-t)*pow(t,3.0)));
+        float g = max(0.0, min(1.0, 15.0*pow(1.0-t,2.0)*pow(t,2.0)));
+        float b = max(0.0, min(1.0, 8.5*pow(1.0-t,3.0)*t));
+        outColor = vec4(r, g, b, 1.0);
+    }
+}
+"""
+
+# -----------------------
+# Helper: compute z trace
+# -----------------------
+def compute_z_trace(cx, cy, degree, max_iter):
+    z = complex(0, 0)
+    c = complex(cx, cy)
+    trace = []
+    for i in range(max_iter):
+        if isinstance(degree, complex):
+            z = z ** degree + c
+        else:
+            z = z ** float(degree) + c
+        trace.append(z)
+        if abs(z) > 4.0:
+            break
+    return trace
+
+def play_z_trace(trace, duration=0.2, volume=0.3):
+    if not trace:
+        return None
+    sample_rate = 44100
+    samples_per_iter = int(sample_rate * duration / len(trace))
+    wave = []
+    for z in trace:
+        freq = 200 + (abs(z) % 800)
+        t = np.linspace(0, duration/len(trace), samples_per_iter, endpoint=False)
+        part = np.sin(2 * np.pi * freq * t + (z.imag * 0.1))
+        wave.extend(part)
+    wave = np.array(wave)
+    wave = wave * (volume / (np.max(np.abs(wave)) + 1e-9))
+    audio = np.int16(wave * 32767)
+    if audio.ndim == 1:
+        audio = np.column_stack((audio, audio))
+    return audio
+
+# -----------------------
+# Initialize
+# -----------------------
+shader = compileProgram(
+    compileShader(vertex_shader, GL_VERTEX_SHADER),
+    compileShader(fragment_shader, GL_FRAGMENT_SHADER)
+)
+
+quad = glGenBuffers(1)
+glBindBuffer(GL_ARRAY_BUFFER, quad)
+glBufferData(GL_ARRAY_BUFFER,
+             32,
+             (GLfloat * 8)(-1, -1, 1, -1, -1, 1, 1, 1),
+             GL_STATIC_DRAW)
+
+pos_attrib = glGetAttribLocation(shader, "position")
+glEnableVertexAttribArray(pos_attrib)
+glVertexAttribPointer(pos_attrib, 2, GL_FLOAT, GL_FALSE, 0, None)
+
+glUseProgram(shader)
+u_resolution = glGetUniformLocation(shader, "u_resolution")
+u_center = glGetUniformLocation(shader, "u_center")
+u_scale = glGetUniformLocation(shader, "u_scale")
+u_max_iter = glGetUniformLocation(shader, "u_max_iter")
+u_degree = glGetUniformLocation(shader, "u_degree")
+
+glUniform2f(u_resolution, WIDTH, HEIGHT)
+
+if isinstance(degree, complex):
+    glUniform2f(u_degree, degree.real, degree.imag)
+else:
+    glUniform2f(u_degree, float(degree), 0.0)
+
+# -----------------------
+# Main loop
+# -----------------------
+center = [-0.5, 0.0]
+scale = 3.0
+max_iter = MAX_ITER
+Paused = True
+mouse_held = False
+channel = None
+running = True
+
+while running:
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            running = False
+        elif event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                running = False
+            elif event.key == pygame.K_SPACE:
+                Paused = not Paused
+            elif event.key == pygame.K_UP:
+                max_iter += 50
+            elif event.key == pygame.K_DOWN:
+                max_iter = max(10, max_iter - 50)
+            elif event.key == pygame.K_i:
+                mx, my = pygame.mouse.get_pos()
+                uvx = mx / WIDTH
+                uvy = 1.0 - (my / HEIGHT)  # flip Y to match fractal coords
+                cx = (uvx - 0.5) * scale * WIDTH / HEIGHT + center[0]
+                cy = (uvy - 0.5) * scale + center[1]
+
+                trace = compute_z_trace(cx, cy, degree, max_iter)
+                if trace:
+                    z_val = trace[-1]
+                    print(f"z = {z_val.real:.6f} + {z_val.imag:.6f}i | |z| = {abs(z_val):.6f}")
+                else:
+                    print("No escape (inside set)")
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button == 1:
+                mouse_held = True
+        elif event.type == pygame.MOUSEBUTTONUP:
+            if event.button == 1:
+                mouse_held = False
+                if channel:
+                    channel.stop()
+                    channel = None
+
+    # --- Smooth zooming with W/S ---
+    keys = pygame.key.get_pressed()
+    if keys[pygame.K_w] or keys[pygame.K_s]:
+        mx, my = pygame.mouse.get_pos()
+        uvx = mx / WIDTH
+        uvy = 1.0 - (my / HEIGHT)
+        cx = (uvx - 0.5) * scale * WIDTH / HEIGHT + center[0]
+        cy = (uvy - 0.5) * scale + center[1]
+
+        zoom_speed = 0.99
+        if keys[pygame.K_w]:
+            scale *= zoom_speed
+        if keys[pygame.K_s]:
+            scale /= zoom_speed
+
+        interp = 1.0 - zoom_speed
+        center[0] += (cx - center[0]) * interp
+        center[1] += (cy - center[1]) * interp
+
+    # --- Update sound if mouse held ---
+    if mouse_held:
+        mx, my = pygame.mouse.get_pos()
+        uvx = mx / WIDTH
+        uvy = 1.0 - (my / HEIGHT)
+        cx = (uvx - 0.5) * scale * WIDTH / HEIGHT + center[0]
+        cy = (uvy - 0.5) * scale + center[1]
+        trace = compute_z_trace(cx, cy, degree, max_iter)
+        audio = play_z_trace(trace)
+        if audio is not None:
+            snd = pygame.sndarray.make_sound(audio)
+            if channel:
+                channel.stop()
+            channel = snd.play(-1)
+
+    glClear(GL_COLOR_BUFFER_BIT)
+    glUseProgram(shader)
+    glUniform2f(u_center, *center)
+    glUniform1f(u_scale, scale)
+    glUniform1i(u_max_iter, max_iter)
+    if not Paused:
+        if isinstance(degree, complex):
+            glUniform2f(u_degree, degree.real, degree.imag)
+            degree += -0.0019 + 0.005j
+        else:
+            glUniform2f(u_degree, float(degree), 0.0)
+            degree += 0.0005
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
+    pygame.display.flip()
+
+pygame.quit()
