@@ -1,0 +1,250 @@
+import pygame
+import random
+import math
+import sys
+import time
+
+# ==============================
+# Config
+# ==============================
+WIDTH, HEIGHT = 1280, 720
+PARTICLES = 4000          # number of particles
+STEP = 1.6                # particle step length (pixels)
+SCALE = 0.0028            # noise sampling frequency (smaller = smoother, bigger = more swirly detail)
+ANGLE_MULT = 2.6          # how strongly noise affects angle
+FIELD_SPEED = 0.05        # how fast the field evolves over time (z-axis in noise)
+FADE_ALPHA = 10           # 0..255; higher = trails fade faster
+THICKNESS = 1             # 1 or 2 looks nice
+COLOR_MODE = "spectrum"   # "spectrum", "mono", "depth"
+
+# Controls:
+#  Space: pause/resume
+#  R: reseed particles
+#  N: new noise seed
+#  C: cycle color modes
+#  S: save screenshot
+#  +/-: change FADE_ALPHA
+#  [ ]: change SCALE
+#  , .: change FIELD_SPEED
+
+# ==============================
+# Minimal 2D Perlin Noise (no deps)
+# ==============================
+class Perlin2D:
+    def __init__(self, seed=None):
+        if seed is None:
+            seed = random.randint(0, 10_000_000)
+        self.seed = seed
+        rng = random.Random(seed)
+        p = list(range(256))
+        rng.shuffle(p)
+        self.perm = p + p
+
+    @staticmethod
+    def fade(t):
+        # 6t^5 - 15t^4 + 10t^3
+        return t*t*t * (t*(t*6 - 15) + 10)
+
+    @staticmethod
+    def lerp(a, b, t):
+        return a + t*(b - a)
+
+    @staticmethod
+    def grad(hash_, x, y, z=0.0):
+        # gradient directions from hash
+        h = hash_ & 7
+        u = x if h < 4 else y
+        v = y if h < 4 else x
+        # choose sign
+        return ((u if (h & 1) == 0 else -u) +
+                (v if (h & 2) == 0 else -v))
+
+    def noise(self, x, y, z=0.0):
+        # unit cube corners
+        X = math.floor(x) & 255
+        Y = math.floor(y) & 255
+        x -= math.floor(x)
+        y -= math.floor(y)
+
+        u = self.fade(x)
+        v = self.fade(y)
+
+        A  = self.perm[X] + Y
+        AA = self.perm[A]
+        AB = self.perm[A + 1]
+        B  = self.perm[X + 1] + Y
+        BA = self.perm[B]
+        BB = self.perm[B + 1]
+
+        # interpolate gradients
+        x1 = self.lerp(self.grad(self.perm[AA], x, y),
+                       self.grad(self.perm[BA], x-1, y), u)
+        x2 = self.lerp(self.grad(self.perm[AB], x, y-1),
+                       self.grad(self.perm[BB], x-1, y-1), u)
+        n = self.lerp(x1, x2, v)
+        # normalize to [0,1]
+        return 0.5 * (n + 1.0)
+
+# ==============================
+# Flow Field + Particles
+# ==============================
+class Particle:
+    __slots__ = ("x","y","hue","life")
+    def __init__(self, w, h):
+        self.x = random.uniform(0, w)
+        self.y = random.uniform(0, h)
+        self.hue = random.random()
+        self.life = random.uniform(0.3, 1.0)
+
+    def step(self, angle):
+        self.x += STEP * math.cos(angle)
+        self.y += STEP * math.sin(angle)
+
+def hsv_to_rgb(h, s, v):
+    i = int(h*6.0)
+    f = h*6.0 - i
+    p = int(255 * v * (1.0 - s))
+    q = int(255 * v * (1.0 - s*f))
+    t = int(255 * v * (1.0 - s*(1.0 - f)))
+    v = int(255 * v)
+    i %= 6
+    if i == 0: return (v, t, p)
+    if i == 1: return (q, v, p)
+    if i == 2: return (p, v, t)
+    if i == 3: return (p, q, v)
+    if i == 4: return (t, p, v)
+    return (v, p, q)
+
+def color_for(p, nval, vy):
+    if COLOR_MODE == "mono":
+        c = int(200 + 55*p.life)
+        return (c, c, c)
+    elif COLOR_MODE == "depth":
+        # map vertical position to hue
+        h = (vy / HEIGHT) % 1.0
+        return hsv_to_rgb(h, 0.7, 1.0)
+    else:  # "spectrum" based on noise value
+        h = (nval * 1.2 + p.hue*0.2) % 1.0
+        return hsv_to_rgb(h, 0.8, 1.0)
+
+def main():
+    pygame.init()
+    pygame.display.set_caption("Perlin Noise Flow Field")
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    clock = pygame.time.Clock()
+
+    # Trail layer (for fade)
+    trail = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+    fade = pygame.Surface((WIDTH, HEIGHT))
+    fade.set_alpha(FADE_ALPHA)
+    fade.fill((0, 0, 0))
+
+    # Field + particles
+    perlin = Perlin2D()
+    particles = [Particle(WIDTH, HEIGHT) for _ in range(PARTICLES)]
+
+    paused = False
+    t = 0.0
+    running = True
+
+    # State that can be tweaked at runtime
+    global COLOR_MODE
+    scale = SCALE
+    field_speed = FIELD_SPEED
+    fade_alpha = FADE_ALPHA
+    thickness = THICKNESS
+    color_mode_idx = ["spectrum","mono","depth"].index(COLOR_MODE)
+
+    font = pygame.font.SysFont("Consolas", 16)
+
+    while running:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_SPACE:
+                    paused = not paused
+                elif event.key == pygame.K_r:
+                    particles = [Particle(WIDTH, HEIGHT) for _ in range(PARTICLES)]
+                elif event.key == pygame.K_s:
+                    fname = f"flow_{int(time.time())}.png"
+                    # composite trails onto a white background for a clean export
+                    export = pygame.Surface((WIDTH, HEIGHT))
+                    export.fill((255,255,255))
+                    export.blit(trail, (0,0))
+                    pygame.image.save(export, fname)
+                    print(f"Saved {fname}")
+                elif event.key == pygame.K_c:
+                    color_mode_idx = (color_mode_idx + 1) % 3
+                    COLOR_MODE = ["spectrum","mono","depth"][color_mode_idx]
+                elif event.key == pygame.K_n:
+                    perlin = Perlin2D()  # new seed
+                elif event.key in (pygame.K_PLUS, pygame.K_EQUALS):
+                    fade_alpha = min(255, fade_alpha + 5)
+                    fade.set_alpha(fade_alpha)
+                elif event.key == pygame.K_MINUS:
+                    fade_alpha = max(0, fade_alpha - 5)
+                    fade.set_alpha(fade_alpha)
+                elif event.key == pygame.K_LEFTBRACKET:
+                    scale = max(0.0005, scale * 0.9)
+                elif event.key == pygame.K_RIGHTBRACKET:
+                    scale = min(0.02, scale * 1.1)
+                elif event.key == pygame.K_COMMA:
+                    field_speed = max(0.0, field_speed * 0.9)
+                elif event.key == pygame.K_PERIOD:
+                    field_speed = min(0.5, field_speed * 1.1)
+
+        if not paused:
+            # fade trails slightly
+            trail.blit(fade, (0,0))
+
+            # advance time (z axis of noise)
+            t += field_speed
+
+            # update + draw particles
+            for p in particles:
+                # wrap edges softly (teleport with jitter)
+                if p.x < -5 or p.x > WIDTH+5 or p.y < -5 or p.y > HEIGHT+5:
+                    p.x = random.uniform(0, WIDTH)
+                    p.y = random.uniform(0, HEIGHT)
+
+                # sample noise as angle
+                nx = p.x * scale
+                ny = p.y * scale
+                # two samples for curl-like variation
+                n1 = perlin.noise(nx, ny, t*0.2)
+                n2 = perlin.noise(nx+123.45, ny-87.65, t*0.2)
+                angle = (n1 - 0.5) * math.tau * ANGLE_MULT + (n2 - 0.5) * 0.6
+
+                x0, y0 = p.x, p.y
+                p.step(angle)
+                color = color_for(p, n1, y0)
+                pygame.draw.line(trail, color, (x0, y0), (p.x, p.y), thickness)
+
+        # compose to screen
+        screen.fill((0,0,0))
+        screen.blit(trail, (0,0))
+
+        # HUD
+        hud = [
+            f"[SPACE] pause: {'ON' if paused else 'OFF'}",
+            f"[C] color: {COLOR_MODE}",
+            f"[R] reseed particles  [N] new noise seed",
+            f"[S] save PNG   fade [{fade_alpha}] (+/-)",
+            f"scale [{scale:.4f}]  field_speed [{field_speed:.3f}]  particles [{len(particles)}]"
+        ]
+        y = 8
+        for line in hud:
+            text = font.render(line, True, (255,255,255))
+            screen.blit(text, (10, y))
+            y += 18
+
+        pygame.display.flip()
+        clock.tick(60)
+
+    pygame.quit()
+    sys.exit()
+
+if __name__ == "__main__":
+    main()
