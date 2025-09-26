@@ -1,0 +1,363 @@
+import pygame
+import ctypes
+import time
+
+pygame.init()
+
+running = True
+Unpaused = False
+
+alpha = 0
+fade_speed = 25
+fading_out = False
+alpha2 = 0
+fade_speed2 = 25
+Cleared = False
+
+Show_info = False
+
+user32 = ctypes.windll.user32
+screen_width = user32.GetSystemMetrics(0)
+screen_height = user32.GetSystemMetrics(1)
+
+rounded_screen_width = round(screen_width, -1)
+rounded_screen_height = round(screen_height, -1)
+
+#--------- Grid size handler ------------------
+
+cell_size = 30
+update_interval = 0.05
+rows = rounded_screen_height // cell_size
+cols = rounded_screen_width // cell_size
+
+pygame.display.set_caption("Conway's Game of Life")
+
+clock = pygame.time.Clock()
+
+#---------- Draw grid --------------------
+
+grid = [[0 for _ in range(cols)] for _ in range(rows)]
+
+def draw_grid(grid_screen, grid):
+    # Fill each cell
+    for y in range(rows):
+        for x in range(cols):
+            rect = pygame.Rect(x * cell_size, y * cell_size, cell_size, cell_size)
+            if grid[y][x] == 1:
+                pygame.draw.rect(grid_screen, (0, 255, 0), rect)
+            else:
+                pygame.draw.rect(grid_screen, (0, 0, 0), rect)
+
+    for x in range(cols + 1):
+        if x == cols // 2:  # middle column
+            pygame.draw.line(grid_screen, (175, 175, 175), (x * cell_size, 0), (x * cell_size, rows * cell_size), 2)
+        else:
+            pygame.draw.aaline(grid_screen, (150, 150, 150), (x * cell_size, 0), (x * cell_size, rows * cell_size))
+
+    for y in range(rows + 1):
+        if y == rows // 2:  # middle row
+            pygame.draw.line(grid_screen, (175, 175, 175), (0, y * cell_size), (cols * cell_size, y * cell_size), 2)
+        else:
+            pygame.draw.aaline(grid_screen, (150, 150, 150), (0, y * cell_size), (cols * cell_size, y * cell_size))
+
+#----------- Shows information on the top-left corner ----------
+
+def info_on_screen():
+    font = pygame.font.Font('../pixellari/Pixellari.ttf', 20)
+    global rows, cols, cell_size, grid, update_interval
+
+    # Static info lines
+    text_lines = [
+        f"Rows = {rows}",
+        f"Columns = {cols}",
+        f"Screen Resolution = {screen_width}x{screen_height}",
+        f"Total number of cells = {rows * cols}"
+    ]
+
+    x, y = 10, 10
+    line_height = 30
+    textbox_width = 400
+    textbox_height = 230  # increased to fit both sliders
+
+    # Draw background box
+    pygame.draw.rect(screen, (0, 0, 0), (x, y, textbox_width, textbox_height))
+
+    # Render static info lines
+    text_colour = (255, 255, 255)
+    for i, line in enumerate(text_lines):
+        screen.blit(font.render(line, True, text_colour), (x + 10, y + 10 + i * line_height))
+
+    # --- Cell-size slider ---
+    cell_slider_x = x + 10
+    cell_slider_y = y + 10 + len(text_lines) * line_height + 20
+    slider_width = 200
+    slider_height = 10
+    pygame.draw.rect(screen, (100, 100, 100), (cell_slider_x, cell_slider_y, slider_width, slider_height))
+
+    handle_radius = 8
+    max_cell_size = 60
+    min_cell_size = 10
+    handle_x = int(cell_slider_x + (cell_size - min_cell_size) / (max_cell_size - min_cell_size) * slider_width)
+    handle_y = cell_slider_y + slider_height // 2
+    pygame.draw.circle(screen, (255, 0, 0), (handle_x, handle_y), handle_radius)
+
+    # Cell-size label
+    label_font = pygame.font.Font('../pixellari/Pixellari.ttf', 15)
+    label_surface = label_font.render("Number of cells", True, (200, 200, 200))
+    screen.blit(label_surface, (cell_slider_x + slider_width + 10, cell_slider_y - 2))
+
+    # --- Time/Speed slider ---
+    speed_slider_x = x + 10
+    speed_slider_y = cell_slider_y + 40
+    pygame.draw.rect(screen, (100, 100, 100), (speed_slider_x, speed_slider_y, slider_width, slider_height))
+
+    max_interval = 0.5   # slowest
+    min_interval = 0.01  # fastest
+    speed_handle_x = int(speed_slider_x + (update_interval - min_interval) / (max_interval - min_interval) * slider_width)
+    speed_handle_y = speed_slider_y + slider_height // 2
+    pygame.draw.circle(screen, (0, 255, 0), (speed_handle_x, speed_handle_y), handle_radius)
+
+    # Speed label
+    speed_label_surface = label_font.render("Update interval (s)", True, (200, 200, 200))
+    screen.blit(speed_label_surface, (speed_slider_x + slider_width + 10, speed_slider_y - 2))
+
+    # --- Mouse interaction ---
+    mouse_pressed = pygame.mouse.get_pressed()
+    mouse_x, mouse_y = pygame.mouse.get_pos()
+
+    # Cell-size adjustment
+    if mouse_pressed[0] and cell_slider_x <= mouse_x <= cell_slider_x + slider_width and cell_slider_y - 10 <= mouse_y <= cell_slider_y + slider_height + 10:
+        old_cell_size = cell_size
+        cell_size = int(min_cell_size + ((mouse_x - cell_slider_x) / slider_width) * (max_cell_size - min_cell_size))
+        if cell_size != old_cell_size:
+            new_rows = rounded_screen_height // cell_size
+            new_cols = rounded_screen_width // cell_size
+            new_grid = [[0 for _ in range(new_cols)] for _ in range(new_rows)]
+            for r in range(min(len(grid), new_rows)):
+                for c in range(min(len(grid[0]), new_cols)):
+                    new_grid[r][c] = grid[r][c]
+            grid = new_grid
+            rows = new_rows
+            cols = new_cols
+
+    # Update interval adjustment
+    if mouse_pressed[0] and speed_slider_x <= mouse_x <= speed_slider_x + slider_width and speed_slider_y - 10 <= mouse_y <= speed_slider_y + slider_height + 10:
+        update_interval = min_interval + ((mouse_x - speed_slider_x) / slider_width) * (max_interval - min_interval)
+
+#----------- creates the controls box ------------
+
+show_controls = True   # box starts expanded
+
+def draw_controls_box():
+    global show_controls
+
+    # Box dimensions + position
+    box_w, box_h = 300, 200
+    box_x = screen_width - box_w - 10
+    box_y = 10
+    bar_h = 25  # height when minimized
+
+    # --- Background ---
+    if show_controls:
+        pygame.draw.rect(screen, (0, 0, 0), (box_x, box_y, box_w, box_h))
+    else:
+        pygame.draw.rect(screen, (0, 0, 0), (box_x, box_y, box_w, bar_h))
+
+    # --- Minimize/Expand button ---
+    button_w, button_h = 20, 20
+    button_x = box_x + box_w - button_w - 5
+    button_y = box_y + 2
+    pygame.draw.rect(screen, (100, 100, 100), (button_x, button_y, button_w, button_h))
+
+    if show_controls:
+        # Draw minus symbol
+        pygame.draw.line(screen, (255, 255, 255),
+                         (button_x + 4, button_y + button_h // 2),
+                         (button_x + button_w - 4, button_y + button_h // 2), 2)
+    else:
+        # Draw plus symbol
+        pygame.draw.line(screen, (255, 255, 255),
+                         (button_x + 4, button_y + button_h // 2),
+                         (button_x + button_w - 4, button_y + button_h // 2), 2)
+        pygame.draw.line(screen, (255, 255, 255),
+                         (button_x + button_w // 2, button_y + 4),
+                         (button_x + button_w // 2, button_y + button_h - 4), 2)
+
+    # --- Controls text ---
+    if show_controls:
+        font = pygame.font.Font('../pixellari/Pixellari.ttf', 18)
+        lines = [
+            "Controls:",
+            "Space - Pause/Unpause",
+            "C - Step Forwards",
+            "X - Clear Grid",
+            "Left Click - Toggle Cell",
+            "Esc - Quit"
+        ]
+        for i, line in enumerate(lines):
+            surf = font.render(line, True, (255, 255, 255))
+            screen.blit(surf, (box_x + 10, box_y + 40 + i * 25))
+
+    # Return rects for handling clicks
+    return pygame.Rect(box_x, box_y, box_w, box_h if show_controls else bar_h), pygame.Rect(button_x, button_y, button_w, button_h)
+
+#-------- blocks clicks inside the control box ---------------
+
+def handle_controls_click(mouse_pos):
+    """Check if click is inside the controls box."""
+    global show_controls
+
+    box_rect, button_rect = draw_controls_box()
+
+    if button_rect.collidepoint(mouse_pos):
+        show_controls = not show_controls
+        return True
+
+    if box_rect.collidepoint(mouse_pos):
+        return True  # block clicks inside the box
+
+    return False
+
+#--------- counts surrounding neighbors to each cell --------
+
+def count_neighbors(grid, row, col):
+    neighbors = 0
+    for y in range(-1, 2):
+        for x in range(-1, 2):
+            if x == 0 and y == 0:
+                continue
+            ny, nx = row + y, col + x
+            if 0 <= ny < rows and 0 <= nx < cols:
+                neighbors += grid[ny][nx]
+    return neighbors
+
+#----- Runs game and constantly refreshes grid ---------
+
+def update_grid(grid):
+    new_grid = [[0 for _ in range(cols)] for _ in range(rows)]
+    for row in range(rows):
+        for col in range(cols):
+            neighbors = count_neighbors(grid, row, col)
+            if grid[row][col] == 1:
+                new_grid[row][col] = 1 if neighbors in (2, 3) else 0
+            else:
+                new_grid[row][col] = 1 if neighbors == 3 else 0
+    return new_grid
+
+# Main loop
+
+Uans = str(input("Would you like to open up game info? (Y/N) "))
+if Uans.lower() == "y":
+    Show_info = True
+
+screen = pygame.display.set_mode((cols * cell_size, rows * cell_size))
+
+
+def fading_text(Unpaused: bool, alpha: int):
+    font = pygame.font.Font('../pixellari/Pixellari.ttf', 200)
+    text_str = "Unpaused" if Unpaused else "Paused"
+    color = (0, 255, 0) if Unpaused else (255, 0, 0)
+    text_surface = font.render(text_str, True, color)
+    temp_surface = pygame.Surface(text_surface.get_size(), pygame.SRCALPHA)
+    temp_surface.blit(text_surface, (0, 0))
+    temp_surface.set_alpha(alpha)
+    text_rect = temp_surface.get_rect(center=screen.get_rect().center)
+    screen.blit(temp_surface, text_rect.topleft)
+
+def cleared_text_fade(clearedbool: bool, alpha: int):
+    if clearedbool:
+        font = pygame.font.Font('../pixellari/Pixellari.ttf', 200)
+        text_surface = font.render("Cleared", True, (255, 0, 0))
+        temp_surface = pygame.Surface(text_surface.get_size(), pygame.SRCALPHA)
+        temp_surface.blit(text_surface, (0, 0))
+        temp_surface.set_alpha(alpha)
+        text_rect = temp_surface.get_rect(center=screen.get_rect().center)
+        screen.blit(temp_surface, text_rect.topleft)
+
+try:
+    while running:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    running = False
+
+                if event.key == pygame.K_SPACE:
+                    Unpaused = not Unpaused
+                    fading_out = True
+                    alpha = 255
+
+                if event.key == pygame.K_x:
+                    grid = [[0 for _ in range(cols)] for _ in range(rows)]
+                    Cleared = True
+                    alpha2 = 255
+
+                if event.key == pygame.K_c:
+                    grid = update_grid(grid)
+
+
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                mouse_x, mouse_y = event.pos
+                # --- Define the "blocked" rectangle area for the info box ---
+                info_x, info_y = 10, 10
+                info_w, info_h = 400, 300
+                info_rect = pygame.Rect(info_x, info_y, info_w, info_h)
+
+                # --- Define the "blocked" rectangle area for the controls box (top-right) ---
+                controls_x, controls_y = screen_width - 310, 10
+                controls_w, controls_h = 300, 300
+                controls_rect = pygame.Rect(controls_x, controls_y, controls_w, controls_h)
+
+                # First let the controls box handle its own clicks (like minimize button)
+                if handle_controls_click((mouse_x, mouse_y)):
+                    continue  # don't process grid clicks if inside controls
+
+                # Block clicks inside the info box area
+                if info_rect.collidepoint(mouse_x, mouse_y):
+                    # You could add slider interaction here if needed
+                    continue
+
+                # Block clicks inside the controls box area
+                if controls_rect.collidepoint(mouse_x, mouse_y):
+                    continue
+
+                # --- Otherwise toggle cells on the grid ---
+                grid_x = mouse_x // cell_size
+                grid_y = mouse_y // cell_size
+                if 0 <= grid_x < cols and 0 <= grid_y < rows:
+                    grid[grid_y][grid_x] = 1 - grid[grid_y][grid_x]
+
+        if Unpaused:
+            grid = update_grid(grid)
+            time.sleep(update_interval)
+
+        if fading_out:
+            alpha -= fade_speed
+            if alpha <= 0:
+                alpha = 0
+                fading_out = False
+        if Cleared:
+            alpha2 -= fade_speed2
+            if alpha2 <= 0:
+                alpha2 = 0
+                Cleared = False
+
+        screen.fill((0, 0, 0))
+
+        draw_grid(screen, grid)
+        fading_text(Unpaused, alpha)
+        cleared_text_fade(Cleared, alpha2)
+
+        if Show_info:
+            info_on_screen()
+            draw_controls_box()
+
+        pygame.display.flip()
+        clock.tick(30)
+
+except KeyboardInterrupt:
+    print("USER INTERRUPT: Use 'X' or ESC to quit")
+finally:
+    pygame.quit()
