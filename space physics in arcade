@@ -1,0 +1,502 @@
+import arcade
+from arcade import draw
+import tkinter as tk
+import ctypes
+import math
+
+user32: ctypes = ctypes.windll.user32
+user_W: float = user32.GetSystemMetrics(0)
+user_H: float = user32.GetSystemMetrics(1)
+
+screen_factor: float = 0.5
+
+screenWidth: int = int(user_W * screen_factor)
+screenHeight: int = int(user_H * screen_factor)
+screenTitle: str = "First arcade"
+
+BLACK = (0, 0, 0)
+WHITE = (255, 255, 255)
+RED = (255, 0, 0)
+GREEN = (0, 255, 0)
+BLUE = (0, 0, 255)
+
+alpha = 255
+
+start_pos = (0,0)
+cell_pos = (0,0)
+cell_rad = 0
+increment = 0
+cell_mass = 7.346*(10**22)
+
+y_offset_incr = 0
+x_offset_incr = 0
+shifting_offset_up = False
+shifting_offset_down = False
+shifting_offset_left = False
+shifting_offset_right = False
+
+trail = []
+trail_max = 0
+
+cells_died = False
+manual_restart = False
+show_arcade_gui = False
+mouse_cell_pos = False
+
+#--------------------------------------------------------------------
+
+planet_rad = 50 # pixel radius of planet
+real_planet_rad = 6370  *1000 # x1000 to conv to meter
+planet_pos = (screenWidth/2, screenHeight/2)
+planet_mass = 1*(10**25)
+
+pixel_ratio = real_planet_rad/planet_rad
+
+G_const = 6.6743*(10**-11)
+dx, dy = 0, 0
+distance = 0
+F_g = 0
+
+vx_start = input("Choose a starter X velocity: ")
+vy_start = input("Choose a starter Y velocity: ")
+
+try:
+    vx_start = float(vx_start)
+except ValueError:
+    print("VX must be a number")
+    vx_start = 0
+
+try:
+    vy_start = float(vy_start)
+except ValueError:
+    print("VY must be a number")
+    vy_start = 0
+
+
+vx, vy = vx_start, vy_start
+dir_x, dir_y = 0, 0
+dt = 0
+
+delta = 0
+
+stable_radius = 0
+
+tan_x, tan_y = 0, 0
+
+print(pixel_ratio)
+
+def conv_newtons_to_mps(force: float, object_mass: float) -> float:
+    accel = force/object_mass
+    return accel
+
+def sim_vx_to_mps(vx_sim: float, frames_per_sec: float, px_ratio: float) -> float:
+    """
+    Convert simulation velocity in pixels/frame to meters/second.
+
+    Args:
+        vx_sim (float): simulation velocity (pixels per frame)
+        frames_per_sec (float): number of simulation frames per second
+        px_ratio (float): ratio of pixel to km
+
+    Returns:
+        float: velocity in meters per second
+    """
+    # compute meters per second
+    vx_mps = vx_sim * px_ratio * frames_per_sec
+
+    return vx_mps
+
+start = False
+restarted = False
+
+
+def config_menu():
+    root = tk.Tk()
+    root.title("Space Config")
+
+    bg_colour = "light gray"
+
+    root.geometry("400x400")
+    root.configure(background=bg_colour)
+
+    def focus_in(event, placeholder: str, entry: tk.Entry):
+        if entry.get() == placeholder:
+            entry.delete(0, tk.END)
+
+    def focus_out(event, placeholder: str, entry: tk.Entry):
+        if entry.get() == "":
+            entry.insert(0, placeholder)
+
+    def submit_config():
+        """
+        takes all values from widget entries and safely converts them all into floats
+
+        if value from entry is not an integer or float (e.g str or blank) it will default 0.0
+        """
+        global vx, vy, planet_mass, cell_mass
+
+        import ast
+
+        try:
+            # Only update if the entry is non-empty and valid
+            vx_content = vx_entry.get()
+            if vx_content != "":
+                try:
+                    vx = ast.literal_eval(vx_content)
+                except (ValueError, SyntaxError):
+                    pass  # Ignore invalid input, leave vx unchanged
+
+            vy_content = vy_entry.get()
+            if vy_content != "":
+                try:
+                    vy = ast.literal_eval(vy_content)
+                except (ValueError, SyntaxError):
+                    pass
+
+            planet_m_content = planet_m_entry.get()
+            if planet_m_content != "":
+                try:
+                    planet_mass = ast.literal_eval(planet_m_content)
+                except (ValueError, SyntaxError):
+                    pass
+
+            cell_m_content = cell_m_entry.get()
+            if cell_m_content != "":
+                try:
+                    cell_mass = ast.literal_eval(cell_m_content)
+                except (ValueError, SyntaxError):
+                    pass
+        finally:
+            print("Settings Changed")
+
+    tk.Button(root, text="Config", command=submit_config).pack(pady=25, ipadx=100)
+
+    global vx, vy, planet_mass, cell_mass
+
+    # VX
+    vx_placeholder = "Enter Initial x velocity..."
+    vx_frame = tk.Frame(root, bg=bg_colour)  # Create a frame to hold Entry + Label
+    vx_frame.pack(pady=25, padx=10, fill="x")  # fill x to span full width
+
+    vx_entry = tk.Entry(vx_frame)
+    vx_entry.insert(0, vx_placeholder)
+    vx_entry.pack(side="left", anchor="w")  # stay west
+    vx_entry.bind("<FocusIn>", lambda e: focus_in(e, vx_placeholder, vx_entry))
+    vx_entry.bind("<FocusOut>", lambda e: focus_out(e, vx_placeholder, vx_entry))
+
+    current_vx_text = tk.Label(vx_frame, text=f"Current vx: {vx}", bg=bg_colour, font=("Arial", 7, "bold"))
+    current_vx_text.pack(side="left", padx=20)
+
+    # VY
+    vy_placeholder = "Enter Initial y velocity..."
+    vy_frame = tk.Frame(root, bg=bg_colour)
+    vy_frame.pack(pady=25, padx=10, fill="x")
+
+    vy_entry = tk.Entry(vy_frame)
+    vy_entry.insert(0, vy_placeholder)
+    vy_entry.pack(side="left", anchor="w")
+    vy_entry.bind("<FocusIn>", lambda e: focus_in(e, vy_placeholder, vy_entry))
+    vy_entry.bind("<FocusOut>", lambda e: focus_out(e, vy_placeholder, vy_entry))
+
+    current_vy_text = tk.Label(vy_frame, text=f"Current vy: {vy}", bg=bg_colour, font=("Arial", 7, "bold"))
+    current_vy_text.pack(side="left", padx=20)
+
+    # Planet Mass
+    planet_m_placeholder = "Enter Planet mass..."
+    planet_frame = tk.Frame(root, bg=bg_colour)
+    planet_frame.pack(pady=25, padx=10, fill="x")
+
+    planet_m_entry = tk.Entry(planet_frame)
+    planet_m_entry.insert(0, planet_m_placeholder)
+    planet_m_entry.pack(side="left", anchor="w")
+    planet_m_entry.bind("<FocusIn>", lambda e: focus_in(e, planet_m_placeholder, planet_m_entry))
+    planet_m_entry.bind("<FocusOut>", lambda e: focus_out(e, planet_m_placeholder, planet_m_entry))
+
+    current_planet_m_text = tk.Label(planet_frame, text=f"Current planet mass: {planet_mass:.2e}", bg=bg_colour, font=("Arial", 7, "bold"))
+    current_planet_m_text.pack(side="left", padx=20)
+
+    # Cell Mass
+    cell_m_placeholder = "Enter Cell mass..."
+    cell_frame = tk.Frame(root, bg=bg_colour)
+    cell_frame.pack(pady=25, padx=10, fill="x")
+
+    cell_m_entry = tk.Entry(cell_frame)
+    cell_m_entry.insert(0, cell_m_placeholder)
+    cell_m_entry.pack(side="left", anchor="w")
+    cell_m_entry.bind("<FocusIn>", lambda e: focus_in(e, cell_m_placeholder, cell_m_entry))
+    cell_m_entry.bind("<FocusOut>", lambda e: focus_out(e, cell_m_placeholder, cell_m_entry))
+
+    current_cell_m_text = tk.Label(cell_frame, text=f"Current cell mass: {cell_mass:.2e}", bg=bg_colour, font=("Arial", 7, "bold"))
+    current_cell_m_text.pack(side="left", padx=20)
+
+    tk.mainloop()
+
+class Window(arcade.Window):
+    def __init__(self, width, height, title):
+        super().__init__(width, height, title)
+        arcade.set_background_color(BLACK + (alpha,))
+
+    @staticmethod
+    def setup():
+        global start_pos, cell_pos, cell_rad, y_offset_incr, x_offset_incr
+        global increment
+        global trail, trail_max
+
+        global planet_pos, planet_rad
+        global F_g, G_const, cell_mass, planet_mass, dx, dy, distance
+        global vx, vy, dt, dir_x, dir_y, delta
+        global tan_x, tan_y
+
+        cell_rad = 2
+        start_pos = (cell_rad, screenHeight / 2)
+        cell_pos = start_pos
+        increment = 0
+
+        y_offset_incr = 5
+        x_offset_incr = 5
+
+        trail = []
+        trail_max = 100
+
+        dx = cell_pos[0] - planet_pos[0]
+        dy = cell_pos[1] - planet_pos[1]
+        distance = math.hypot(dx, dy)*pixel_ratio  # Euclidean distance / hypotenuse
+
+        planet_rad = 50
+
+        planet_pos = (screenWidth / 2, screenHeight / 2)
+
+        F_g = G_const*((cell_mass * planet_mass) / ((distance*1000)**2))
+
+        delta = 60
+        dt = 1/delta
+
+        dir_x = dx / distance
+        dir_y = dy / distance
+
+
+
+        print("STARTUP COMPLETE")
+
+
+    def on_draw(self):
+        # Start the rendering process
+        self.clear()
+
+        draw.draw_circle_filled(planet_pos[0], planet_pos[1], planet_rad, WHITE)
+
+        #================= CELL PHYSIC =================
+
+        global start, restarted, manual_restart
+
+        global cell_pos, cell_rad, trail
+        global y_offset_incr, shifting_offset_up, shifting_offset_down
+        global x_offset_incr, shifting_offset_left, shifting_offset_right
+
+        global cells_died
+        global distance, dx, dy
+        global F_g, dt, vx, vy, dir_x, dir_y
+
+        global stable_radius, tan_x, tan_y
+
+        # shifting the cell's y pos before the simulation starts using W/UP and S/DOWN
+        if not start:
+            if shifting_offset_up:
+                cell_pos = (cell_pos[0], cell_pos[1] + y_offset_incr)
+            if shifting_offset_down:
+                cell_pos = (cell_pos[0], cell_pos[1] - y_offset_incr)
+            if shifting_offset_left:
+                cell_pos = (cell_pos[0] - x_offset_incr, cell_pos[1])
+            if shifting_offset_right:
+                cell_pos = (cell_pos[0] + x_offset_incr, cell_pos[1])
+
+            dx = planet_pos[0] - cell_pos[0]
+            dy = planet_pos[1] - cell_pos[1]
+
+            velocity = sim_vx_to_mps(vx, delta, pixel_ratio)
+
+            epsilon = 1e-6
+
+            if abs(velocity) < epsilon:
+                stable_radius = float('inf')
+                tan_x = None
+                tan_y = None
+            else:
+                stable_radius = ((G_const * planet_mass) / (velocity ** 2)) * delta
+
+                tan_x = (-vy * stable_radius) / (math.sqrt((vx ** 2) + (vy ** 2))) + planet_pos[0]
+                tan_y = (vx * stable_radius) / (math.sqrt((vx ** 2) + (vy ** 2))) + planet_pos[1]
+
+            #print(stable_radius)
+            #print(round(distance_pixels, 0))
+            #print(f"{tan_x}, {tan_y}")
+
+            if show_arcade_gui and tan_x is not None and tan_y is not None:
+                draw.draw_circle_outline(
+                    planet_pos[0],
+                    planet_pos[1],
+                    stable_radius,
+                    GREEN,
+                    border_width=1
+                )
+
+                draw.draw_circle_filled(tan_x, tan_y, 5, (255,0,0,128))
+
+            if mouse_cell_pos:
+                mouse_x = self.mouse.x
+                mouse_y = self.mouse.y
+
+                cell_pos = (mouse_x, mouse_y)
+
+            cells_died = False
+
+            # Draw the current cell as bright white
+            draw.draw_circle_filled(cell_pos[0], cell_pos[1], cell_rad, WHITE)
+
+            if restarted:
+                Window.setup()
+                restarted = False
+
+        if not cells_died:
+
+            # Move and add to trail before drawing
+            if start:
+
+                if show_arcade_gui and tan_x is not None and tan_y is not None:
+                    draw.draw_circle_outline(
+                        planet_pos[0],
+                        planet_pos[1],
+                        stable_radius,
+                        GREEN,
+                        border_width=1
+                    )
+
+                # Vector from cell → planet
+                dx = planet_pos[0] - cell_pos[0]
+                dy = planet_pos[1] - cell_pos[1]
+
+                # Euclidean distance in pixels
+                distance_pixels = math.hypot(dx, dy)
+                if distance_pixels == 0:
+                    distance_pixels = 0.001  # prevent divide-by-zero
+
+                #print(round(distance_pixels, 0))
+
+                # Normalized direction vector toward planet
+                dir_x = dx / distance_pixels
+                dir_y = dy / distance_pixels
+
+                # Convert pixel distance to meters for physics
+                distance_meters = distance_pixels * pixel_ratio
+
+                # Gravitational force and acceleration
+                F_g = G_const * (cell_mass * planet_mass) / (distance_meters ** 2)
+                accel = conv_newtons_to_mps(F_g, cell_mass)
+
+                # Time step (assuming ~60 FPS)
+                dt = 1 / delta
+
+                # Update velocity
+                vx += accel * dir_x * dt
+                vy += accel * dir_y * dt
+
+                # Update position
+                cell_pos = (cell_pos[0] + vx, cell_pos[1] + vy)
+                trail.append(cell_pos)
+
+                # Collision detection
+                if distance_pixels <= (cell_rad + planet_rad) or manual_restart:
+                    trail.clear()
+                    cells_died = True
+                    start = False
+                    restarted = True
+                    manual_restart = False
+
+                    vx = vx_start
+                    vy = vy_start
+
+                # Limit trail length
+                if len(trail) > trail_max:
+                    trail.pop(0)
+
+            # Draw shaded trail (older = darker)
+            for i, pos in enumerate(trail):
+                shade = int(i / len(trail) * 255) if len(trail) > 0 else 255
+                color = (shade, shade, shade)
+                size_dissipation = i / len(trail) * cell_rad if len(trail) > 0 else cell_rad
+                draw.draw_circle_filled(pos[0], pos[1], size_dissipation, color)
+
+    def on_key_press(self, symbol: int, modifiers: int):
+        if symbol == arcade.key.ESCAPE:
+            arcade.close_window()
+
+        global start, manual_restart
+        if symbol == arcade.key.SPACE:
+            start = True
+
+        if symbol == arcade.key.R:
+            if start:
+                manual_restart = True
+
+        global show_arcade_gui
+        if symbol == arcade.key.F:
+            show_arcade_gui = not show_arcade_gui
+
+        global mouse_cell_pos
+        if symbol == arcade.key.LCTRL:
+            mouse_cell_pos = True
+
+        global shifting_offset_up, shifting_offset_down
+        global shifting_offset_left, shifting_offset_right
+        if symbol == arcade.key.W or symbol == arcade.key.UP:
+            shifting_offset_up = True
+        if symbol == arcade.key.S or symbol == arcade.key.DOWN:
+            shifting_offset_down = True
+        if symbol == arcade.key.A or symbol == arcade.key.LEFT:
+            shifting_offset_left = True
+        if symbol == arcade.key.D or symbol == arcade.key.RIGHT:
+            shifting_offset_right = True
+
+        if symbol == arcade.key.I:
+            if not start:
+                config_menu()
+
+    def on_key_release(self, symbol: int, modifiers: int):
+        global shifting_offset_up, shifting_offset_down
+        global shifting_offset_right, shifting_offset_left
+        if symbol == arcade.key.W or symbol == arcade.key.UP:
+            shifting_offset_up = False
+        if symbol == arcade.key.S or symbol == arcade.key.DOWN:
+            shifting_offset_down = False
+        if symbol == arcade.key.A or symbol == arcade.key.LEFT:
+            shifting_offset_left = False
+        if symbol == arcade.key.D or symbol == arcade.key.RIGHT:
+            shifting_offset_right = False
+
+        global mouse_cell_pos
+        if symbol == arcade.key.LCTRL:
+            mouse_cell_pos = False
+
+if __name__ == '__main__':
+
+    try:
+        win = Window(int(screenWidth), int(screenHeight), screenTitle)
+        win.setup()
+        arcade.run()
+
+    except ZeroDivisionError as e:
+        print(e)
+    except TypeError as e:
+        print(e)
+    except RuntimeError as e:
+        print(e)
+    except RuntimeWarning as e:
+        print(e)
+    except KeyboardInterrupt as e:
+        print(e)
+    except Exception as e:
+        print(e)
+
+    finally:
+        print("SIMULATION COMPLETE")
+        print("Shutting down...")
