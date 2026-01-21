@@ -160,7 +160,7 @@ denary = "" # INPUT DENARY HERE
 
 binary = "" # INPUT BINARY HERE
 
-hexa = "03fcad" # INPUT HEXADECIMAL HERE
+hexa = "" # INPUT HEXADECIMAL HERE
 
 
 hex_cls = Autohex(denary=denary, binary=binary, hexa=hexa)
@@ -186,5 +186,6 @@ elif hexa:
     print(f"\nHEX: {hexa}")
     print(f"BINARY: {bina}")
     print(f"DENARY: {den:.0f}")
+
 
 
