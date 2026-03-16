@@ -1,0 +1,159 @@
+import arcade
+import math
+
+import numpy as np
+
+
+class Sim(arcade.Window):
+    def __init__(self, width, height, title):
+        super().__init__(width, height, title, fullscreen=True)
+
+        self.s = 100
+        self.cx = width / 2
+        self.cy = height / 2
+
+        self.vertices = np.array([
+            [-1,  1,  1],
+            [ 1,  1,  1],
+            [ 1, -1,  1],
+            [-1, -1,  1],
+            [-1,  1, -1],
+            [ 1,  1, -1],
+            [ 1, -1, -1],
+            [-1, -1, -1]
+        ])
+
+        self.edges = [
+            [0,1],[1,2],[2,3],[3,0],
+            [4,5],[5,6],[6,7],[7,4],
+            [0,4],[1,5],[2,6],[3,7]
+        ]
+
+        self.movement = {
+            "up": False,
+            "down": False,
+            "left": False,
+            "right": False,
+        }
+
+        self.a_vel = [0, 0]
+        self.theta = 0
+        self.phi = 0
+        self.incr = 0.1
+
+    def project(self, v):
+        x, y, z = v
+
+        offset = 8
+
+        x1 = (x * self.s + self.cx) - (2 * self.s - offset)
+        y1 = (y * self.s + self.cy) - self.s - offset
+        return x1, y1
+
+    def rotation(self, theta, phi, pos):
+        sin_theta = math.sin(theta)
+        cos_theta = math.cos(theta)
+        sin_phi = math.sin(phi)
+        cos_phi = math.cos(phi)
+
+        x_matrix = [
+            [1, 0, 0],
+            [0, cos_theta, -sin_theta],
+            [0, sin_theta, cos_theta]
+        ]
+
+        y_matrix = [
+            [cos_phi, 0, sin_phi],
+            [0, 1, 0],
+            [-sin_phi, 0, cos_phi]
+        ]
+
+        p1 = pos @ x_matrix
+        p2 = p1 @ y_matrix
+
+        return p2
+
+
+    def on_draw(self):
+        self.clear()
+
+        arcade.draw_point(self.width/2, self.height/2, (255, 255, 255), 3)
+
+        rotated_points = self.rotation(self.theta, self.phi, self.vertices)
+        points = [self.project(v) for v in rotated_points]
+
+        for a, b in self.edges:
+            x1, y1 = points[a]
+            x2, y2 = points[b]
+            arcade.draw_line(x1, y1, x2, y2, arcade.color.WHITE, 2)
+
+            arcade.draw_circle_filled(
+                x1, y1,
+                5,
+                (255, 0, 0)
+            )
+            arcade.draw_circle_filled(
+                x2, y2,
+                5,
+                (255, 0, 0)
+            )
+
+    def on_update(self, dt):
+
+        a_vel = self.a_vel
+        smoothing = 2
+
+        if self.movement["up"]:
+            a_vel[0] += self.incr
+        if self.movement["down"]:
+            a_vel[0] -= self.incr
+        if self.movement["left"]:
+            a_vel[1] -= self.incr
+        if self.movement["right"]:
+            a_vel[1] += self.incr
+
+        decay = math.exp(-smoothing * dt)
+
+        if not self.movement["left"] and not self.movement["right"]:
+            a_vel[0] *= decay
+        if not self.movement["up"] and not self.movement["down"]:
+            a_vel[1] *= decay
+
+        self.theta += a_vel[0] * dt
+        self.phi += a_vel[1] * dt
+
+        self.a_vel = a_vel
+
+
+    def on_key_press(self, symbol, modifiers):
+        if symbol == arcade.key.ESCAPE:
+            arcade.close_window()
+
+        if symbol == arcade.key.UP:
+            self.movement["up"] = True
+        if symbol == arcade.key.DOWN:
+            self.movement["down"] = True
+        if symbol == arcade.key.LEFT:
+            self.movement["left"] = True
+        if symbol == arcade.key.RIGHT:
+            self.movement["right"] = True
+
+    def on_key_release(self, symbol, modifiers):
+
+        if symbol == arcade.key.UP:
+            self.movement["up"] = False
+        if symbol == arcade.key.DOWN:
+            self.movement["down"] = False
+        if symbol == arcade.key.LEFT:
+            self.movement["left"] = False
+        if symbol == arcade.key.RIGHT:
+            self.movement["right"] = False
+
+
+def main():
+    width, height = arcade.get_display_size()
+    window = Sim(width, height, "Sim")
+    arcade.run()
+
+if __name__ == "__main__":
+    main()
