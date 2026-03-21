@@ -1,0 +1,104 @@
+from urllib.error import HTTPError, URLError
+import os
+
+import yt_dlp
+from yt_dlp import DownloadError
+from yt_dlp.utils import ExtractorError
+
+import tkinter as tk
+
+vid_path = input("Desired Vid path: ")
+if not vid_path:
+    vid_path = r"<DEFAULT FILE PATH>"
+
+root = tk.Tk()
+root.geometry("500x300")
+root.title("Youtube Downloader")
+root.configure(background="light grey")
+
+def submit():
+    global url
+    prompt_url = tkText.get("1.0", "end").strip()
+    url = f"{prompt_url}"
+    root.destroy()
+
+tkHeader = tk.Label(root, text="Enter URL Below To Download",font=("Arial",15))
+tkHeader.pack(pady=20)
+
+tkText = tk.Text(root, height=2, width=50, background="light blue")
+tkText.pack(pady=50)
+
+tkBtn = tk.Button(root, text="Submit", command=submit, width=20, height=2, font=("Arial",10))
+tkBtn.pack()
+
+url = ""
+url.removeprefix("https://")
+
+tk.mainloop()
+
+os.makedirs(vid_path, exist_ok=True)  # Ensure the directory exists
+
+ydl_opts = {
+    #'outtmpl': os.path.join(vid_path, '%(title)s.%(ext)s'),
+    'outtmpl': os.path.join(vid_path, '%(title)s.mp3'),
+    'ignoreconfig': True,
+    'verbose': False  # Add this for detailed logging
+}
+
+try:
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+
+        """
+        for i, attribute in enumerate(info, start=1):
+            print(f"{i}: {attribute}")
+        """
+
+        print(f"\nFILE PATH: {os.path.join(vid_path, info["title"])}.{info["ext"]}")
+        ans = input("DOWNLOAD COMPLETE\nWould you like to open up the folder?\n\n (Y/N) ")
+        if ans.lower() == "y":
+            os.startfile(vid_path)
+        else:
+            exit()
+
+except PermissionError:
+    print(PermissionError)
+
+except HTTPError:
+    print(HTTPError)
+
+except URLError:
+    print(URLError)
+
+except FileNotFoundError:
+    print(FileNotFoundError)
+
+except ConnectionError:
+    print(ConnectionError)
+
+except OSError:
+    print(OSError)
+
+except ExtractorError:
+    print(ExtractorError)
+
+except DownloadError:
+    print(DownloadError)
+
+except KeyError:
+    print(KeyError)
+
+except ModuleNotFoundError:
+    print(ModuleNotFoundError)
+
+except SyntaxError:
+    print(SyntaxError)
+
+except NameError:
+    print(NameError)
+
+except KeyboardInterrupt:
+    print(KeyboardInterrupt)
+
+except Exception as e:
+    print(f"Unknown/Unexpected error: {e}")
